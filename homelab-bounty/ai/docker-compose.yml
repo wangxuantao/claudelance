@@ -1,0 +1,92 @@
+services:
+  ollama:
+    image: ollama/ollama:0.3.12
+    container_name: homelab-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.ollama.rule=Host(`ollama.${DOMAIN}`)"
+      - traefik.http.routers.ollama.entrypoints=websecure
+      - traefik.http.routers.ollama.tls=true
+      - traefik.http.services.ollama.loadbalancer.server.port=11434
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:0.3.32
+    container_name: homelab-openwebui
+    restart: unless-stopped
+    volumes:
+      - webui-data:/app/backend/data
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_AUTH=false
+      - TZ=${TZ:-Asia/Shanghai}
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.webui.rule=Host(`ai.${DOMAIN}`)"
+      - traefik.http.routers.webui.entrypoints=websecure
+      - traefik.http.routers.webui.tls=true
+      - traefik.http.services.webui.loadbalancer.server.port=8080
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      - ollama
+
+  stable-diffusion:
+    image: universonic/stable-diffusion-webui:latest
+    container_name: homelab-sd
+    restart: unless-stopped
+    volumes:
+      - sd-models:/app/models
+      - sd-outputs:/app/outputs
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - COMMANDLINE_ARGS=--listen --api --no-half-vae --skip-torch-cuda-test
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.sd.rule=Host(`sd.${DOMAIN}`)"
+      - traefik.http.routers.sd.entrypoints=websecure
+      - traefik.http.routers.sd.tls=true
+      - traefik.http.services.sd.loadbalancer.server.port=7860
+
+  perplexica:
+    image: itzcrazykns1337/perplexica:latest
+    container_name: homelab-perplexica
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.perplexica.rule=Host(`search.${DOMAIN}`)"
+      - traefik.http.routers.perplexica.entrypoints=websecure
+      - traefik.http.routers.perplexica.tls=true
+      - traefik.http.services.perplexica.loadbalancer.server.port=3001
+
+volumes:
+  ollama-data:
+  webui-data:
+  sd-models:
+  sd-outputs:
+
+networks:
+  proxy:
+    external: true
