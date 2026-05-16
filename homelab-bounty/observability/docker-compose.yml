@@ -1,0 +1,149 @@
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: homelab-prometheus
+    restart: unless-stopped
+    volumes:
+      - prometheus-data:/prometheus
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command: --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.retention.time=30d
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.${DOMAIN}`)"
+      - traefik.http.routers.prometheus.entrypoints=websecure
+      - traefik.http.routers.prometheus.tls=true
+      - traefik.http.services.prometheus.loadbalancer.server.port=9090
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: homelab-grafana
+    restart: unless-stopped
+    volumes:
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+      - TZ=${TZ:-Asia/Shanghai}
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.grafana.rule=Host(`grafana.${DOMAIN}`)"
+      - traefik.http.routers.grafana.entrypoints=websecure
+      - traefik.http.routers.grafana.tls=true
+      - traefik.http.services.grafana.loadbalancer.server.port=3000
+    depends_on:
+      - prometheus
+      - loki
+
+  loki:
+    image: grafana/loki:3.2.0
+    container_name: homelab-loki
+    restart: unless-stopped
+    volumes:
+      - loki-data:/loki
+      - ./loki-config.yml:/etc/loki/local-config.yaml:ro
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=false"
+
+  promtail:
+    image: grafana/promtail:3.2.0
+    container_name: homelab-promtail
+    restart: unless-stopped
+    volumes:
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - ./promtail-config.yml:/etc/promtail/config.yml:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=false"
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    container_name: homelab-tempo
+    restart: unless-stopped
+    volumes:
+      - tempo-data:/var/tempo
+      - ./tempo-config.yml:/etc/tempo/config.yml:ro
+    command: -config.file=/etc/tempo/config.yml
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=false"
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: homelab-alertmanager
+    restart: unless-stopped
+    volumes:
+      - alertmanager-data:/alertmanager
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.alertmanager.rule=Host(`alerts.${DOMAIN}`)"
+      - traefik.http.routers.alertmanager.entrypoints=websecure
+      - traefik.http.routers.alertmanager.tls=true
+      - traefik.http.services.alertmanager.loadbalancer.server.port=9093
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.50.0
+    container_name: homelab-cadvisor
+    restart: unless-stopped
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=false"
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: homelab-node-exporter
+    restart: unless-stopped
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command: --path.procfs=/host/proc --path.sysfs=/host/sys --collector.filesystem.mount-points-exclude=^(sys|proc|dev|host|etc)($$|/)
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=false"
+
+  uptime-kuma:
+    image: louislam/uptime-kuma:1.23.13
+    container_name: homelab-uptime
+    restart: unless-stopped
+    volumes:
+      - uptime-data:/app/data
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.uptime.rule=Host(`uptime.${DOMAIN}`)"
+      - traefik.http.routers.uptime.entrypoints=websecure
+      - traefik.http.routers.uptime.tls=true
+      - traefik.http.services.uptime.loadbalancer.server.port=3001
+
+volumes:
+  prometheus-data:  grafana-data:
+  loki-data:        tempo-data:
+  alertmanager-data: uptime-data:
+
+networks:
+  proxy:
+    external: true
