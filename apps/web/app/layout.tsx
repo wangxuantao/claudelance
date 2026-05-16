@@ -7,7 +7,7 @@ import { BottomNav } from "@/components/bottom-nav";
 import { Providers } from "./providers";
 import "./globals.css";
 
-export const metadata: Metadata = {
+export const metadata: Metadata: Metadata = {
   title: "Claudelance — Earn cUSD with idle Claude Code",
   description:
     "The first onchain marketplace where idle Claude Code subscriptions earn cUSD by solving GitHub bounties on Celo.",
@@ -39,7 +39,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {children}
           <BottomNav />
         </Providers>
-      </body>
+            <InstallPrompt />
+    </body>
     </html>
   );
 }
