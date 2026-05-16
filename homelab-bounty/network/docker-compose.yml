@@ -1,0 +1,182 @@
+# =============================================================================
+# HomeLab Network Stack
+# AdGuard Home + WireGuard Easy + Cloudflare DDNS + Unbound
+# =============================================================================
+# Bounty: #4 — Network Stack ($140)
+# Target: @illbnm / homelab-stack
+# =============================================================================
+#
+# 国内镜像说明 (CN Mirror Guide):
+#   Docker Hub 镜像默认使用 docker.m.daocloud.io 加速。
+#   ghcr.io 镜像在国内可能较慢，可考虑以下替代方案：
+#     - ghcr.nju.edu.cn (南京大学 GHCR 镜像)
+#     - 或先 docker pull 后再 tag
+#   生产环境建议自建镜像缓存。
+#
+# 快速启动:
+#   1. cp .env.example .env
+#   2. 编辑 .env 填入你的域名、密码、Cloudflare Token
+#   3. sudo bash setup.sh          # 处理 DNS 53 端口冲突
+#   4. docker compose up -d
+#   5. 浏览器访问 http://<host>:3000 (AdGuard Home)
+#      WireGuard UI: http://<host>:51821
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Unbound — 递归 DNS 解析器 (AdGuard Home 上游)
+  # ---------------------------------------------------------------------------
+  unbound:
+    image: docker.m.daocloud.io/mvance/unbound:1.21.1
+    container_name: unbound
+    restart: unless-stopped
+    hostname: unbound
+    networks:
+      net_internal:
+        ipv4_address: 172.22.0.10
+    volumes:
+      - ./unbound/unbound.conf:/opt/unbound/etc/unbound/unbound.conf:ro
+    cap_add:
+      - NET_BIND_SERVICE
+    healthcheck:
+      test: ["CMD", "dig", "@127.0.0.1", "cloudflare.com", "+short"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # AdGuard Home — DNS 过滤 + 广告/ tracker 屏蔽
+  # 监听 53/UDP, 67/UDP(DHCP), 853/TCP(DoT), 3000/TCP(Web UI)
+  # ---------------------------------------------------------------------------
+  adguardhome:
+    image: docker.m.daocloud.io/adguard/adguardhome:v0.107.52
+    container_name: adguardhome
+    restart: unless-stopped
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "3000:80/tcp"                       # Web 管理界面
+      - "853:853/tcp"                        # DNS-over-TLS (可选)
+    networks:
+      net_internal:
+        ipv4_address: 172.22.0.11
+    volumes:
+      - ./adguard/work:/opt/adguardhome/work # 过滤规则 + 统计
+      - ./adguard/conf:/opt/adguardhome/conf # AdGuardHome.yaml
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+    depends_on:
+      unbound:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # WireGuard Easy — VPN 服务端 (Web UI 管理客户端)
+  # Web UI: http://<host>:51821
+  # VPN 端口: 51820/UDP
+  # ---------------------------------------------------------------------------
+  wireguard-easy:
+    # ghcr.io 镜像 — 国内可用 ghcr.nju.edu.cn 或自建代理
+    image: ghcr.io/wg-easy/wg-easy:14
+    container_name: wireguard-easy
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+      - net.ipv4.ip_forward=1
+    ports:
+      - "51820:51820/udp"                   # WireGuard 监听端口
+      - "51821:51821/tcp"                    # Web UI
+    networks:
+      net_internal:
+        ipv4_address: 172.22.0.12
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      # Web UI 密码 (bcrypt hash 或明文; wg-easy 自动 hash 明文)
+      - WG_HOST=${WG_HOST}                   # 你的公网 IP 或域名
+      - PASSWORD_HASH=${WG_PASSWORD_HASH}    # wg-easy Web UI 密码 (推荐 bcrypt)
+      - WG_PORT=51820
+      - WG_DEFAULT_ADDRESS=10.8.0.x
+      - WG_DEFAULT_DNS=172.22.0.11           # 指向 AdGuard Home
+      - WG_ALLOWED_IPS=${WG_ALLOWED_IPS:-0.0.0.0/0, ::/0}
+      - WG_PERSISTENT_KEEPALIVE=25
+      - WG_MTU=1420
+      - UI_TRAFFIC_STATS=true
+      - UI_CHART_TYPE=1                      # 0=关闭, 1=折线图, 2=面积图, 3=柱状图
+    volumes:
+      - ./wireguard:/etc/wireguard
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:51821/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Cloudflare DDNS — 动态 DNS 更新器
+  # 支持 IPv4 + IPv6 双栈，多域名
+  # ---------------------------------------------------------------------------
+  cloudflare-ddns:
+    # ghcr.io 镜像 — 国内可用 ghcr.nju.edu.cn 或自建代理
+    image: ghcr.io/favonia/cloudflare-ddns:1.14.0
+    container_name: cloudflare-ddns
+    restart: unless-stopped
+    networks:
+      net_internal:
+        ipv4_address: 172.22.0.13
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - CF_API_TOKEN=${CF_API_TOKEN}          # Cloudflare API Token
+      - DOMAINS=${CF_DOMAINS}                  # 多域名用逗号分隔, e.g. "example.com,*.example.com"
+      - PROXIED=${CF_PROXIED:-false}           # 是否启用 Cloudflare CDN 代理
+      - IP6_PROVIDER=${CF_IP6_PROVIDER:-none}  # IPv6 提供商: none, cloudflare, local 等
+      - DETECTION_TIMEOUT=10
+      - UPDATE_CRON=@every 5m                  # Cron 表达式
+      - TTL=1                                  # DNS TTL (仅当 PROXIED=false 时生效)
+      - RECORD_TTL=1
+      - DELETE_ON_STOP=false
+      - CACHE_EXPIRATION=720h0m0s             # 缓存过期 (30 天)
+    healthcheck:
+      test: ["CMD", "/bin/sh", "-c", "ps aux | grep -v grep | grep cloudflare-ddns"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  net_internal:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/16
