@@ -1,0 +1,40 @@
+services:
+  duplicati:
+    image: lscr.io/linuxserver/duplicati:2.0.8
+    container_name: homelab-duplicati
+    restart: unless-stopped
+    volumes:
+      - duplicati-config:/config
+      - duplicati-backups:/backups
+      - /:/source:ro
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ:-Asia/Shanghai}
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.duplicati.rule=Host(`backup.${DOMAIN}`)"
+      - traefik.http.routers.duplicati.entrypoints=websecure
+      - traefik.http.routers.duplicati.tls=true
+      - traefik.http.services.duplicati.loadbalancer.server.port=8200
+
+  restic-server:
+    image: restic/rest-server:0.13.0
+    container_name: homelab-restic
+    restart: unless-stopped
+    command: --path /data --no-auth
+    volumes:
+      - restic-data:/data
+    networks:
+      - proxy
+
+volumes:
+  duplicati-config:
+  duplicati-backups:
+  restic-data:
+
+networks:
+  proxy:
+    external: true
