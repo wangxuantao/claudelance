@@ -106,6 +106,9 @@ const config: Config = {
         xl: "16px",
         "2xl": "24px",
       },
+      maxWidth: {
+        mobile: "480px",
+      },
       boxShadow: {
         glass: "0 8px 32px 0 rgba(31, 38, 135, 0.08)",
         "glass-strong": "0 16px 48px 0 rgba(31, 38, 135, 0.18)",
