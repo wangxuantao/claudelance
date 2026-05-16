@@ -1,0 +1,65 @@
+services:
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:2024.9.3
+    container_name: homelab-ha
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ha-config:/config
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+
+  nodered:
+    image: nodered/node-red:4.0.3
+    container_name: homelab-nodered
+    restart: unless-stopped
+    volumes:
+      - nodered-data:/data
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.nodered.rule=Host(`nodered.${DOMAIN}`)"
+      - traefik.http.routers.nodered.entrypoints=websecure
+      - traefik.http.routers.nodered.tls=true
+      - traefik.http.services.nodered.loadbalancer.server.port=1880
+
+  mosquitto:
+    image: eclipse-mosquitto:2.0.19
+    container_name: homelab-mosquitto
+    restart: unless-stopped
+    volumes:
+      - mosquitto-config:/mosquitto/config
+      - mosquitto-data:/mosquitto/data
+    networks:
+      - proxy
+
+  zigbee2mqtt:
+    image: koenkk/zigbee2mqtt:1.40.2
+    container_name: homelab-z2m
+    restart: unless-stopped
+    volumes:
+      - z2m-data:/app/data
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+    networks:
+      - proxy
+    labels:
+      - traefik.enable=true
+      - "traefik.http.routers.z2m.rule=Host(`zigbee.${DOMAIN}`)"
+      - traefik.http.routers.z2m.entrypoints=websecure
+      - traefik.http.routers.z2m.tls=true
+      - traefik.http.services.z2m.loadbalancer.server.port=8080
+
+volumes:
+  ha-config:
+  nodered-data:
+  mosquitto-config:
+  mosquitto-data:
+  z2m-data:
+
+networks:
+  proxy:
+    external: true
